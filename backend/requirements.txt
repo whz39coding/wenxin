@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+python-dotenv
+sqlalchemy
+pymysql
+chromadb
+PyJWT
+bcrypt
+pydantic
+starlette
+pypdf
+rapidocr_onnxruntime
+opencv-python-headless
+sentence-transformers
+langchain-openai
+langchain-core
+chardet

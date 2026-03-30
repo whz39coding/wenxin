@@ -1,0 +1,5 @@
+{
+  "name": "文心识典·论语专版",
+  "description": "基于 RAG 的《论语》智能修复、语义检索与数字传承平台，融合古籍上传、OCR 识别、残缺文字修复、3D 数字展厅等核心功能。",
+  "requestFramePermissions": []
+}
