@@ -9,16 +9,22 @@ type RestoreResponse = {
   restored_text: string;
   restored_segments: Array<{ text: string; restored: boolean }>;
   evidence: string[];
+  explanation: string;
   model: string;
 };
 
 export default function RestorePage() {
-  const [inputText, setInputText] = useState('学而时习之，不亦□乎？');
+  const [inputText, setInputText] = useState('学而时习之，不亦_乎？');
   const [isRestoring, setIsRestoring] = useState(false);
   const [result, setResult] = useState<RestoreResponse | null>(null);
   const [error, setError] = useState('');
 
   async function handleRestore() {
+    if (!inputText.includes('_')) {
+      setError("请使用 '_' 标记残缺位置后再补阙。");
+      return;
+    }
+
     setIsRestoring(true);
     setError('');
     try {
@@ -34,13 +40,13 @@ export default function RestorePage() {
   return (
     <div className="page-shell space-y-8">
       <PageIntro
-        eyebrow="RESTORE LAB"
+        eyebrow="残篇续脉"
         title="残篇补阙"
-        description="补阙页已接入后端修复接口。系统会先检索《论语》相关章句，再调用模型补全残缺文本，并返回补阙依据。"
+        description="补阙页已接入后端修复接口。系统会先检索《论语》相关章句进行补全，若知识库无法补全，再自动调用模型补阙并返回依据。"
         aside={
           <>
-            <MetaBlock label="INPUT" value="可直接录入缺字文本，缺失位置建议用 __、□ 或 [...] 标示。" />
-            <MetaBlock label="OUTPUT" value="返回补全文字、参考依据与高亮片段，适合继续人工校勘。" />
+            <MetaBlock label="输入" value="填入待补阙的文本，缺失位置请使用 '_' 表示（例如：不亦_乎）。" />
+            <MetaBlock label="输出" value="返回补全文字、参考依据与高亮片段，适合继续人工校勘。" />
           </>
         }
       />
@@ -50,17 +56,10 @@ export default function RestorePage() {
           <PaperPanel className="paper-texture px-6 py-6 lg:px-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <p className="text-xs tracking-[0.32em] text-[color:var(--ink-faint)]">MISSING TEXT INPUT</p>
+                <p className="text-xs tracking-[0.32em] text-[color:var(--ink-faint)]">录阙</p>
                 <h2 className="mt-2 font-display text-3xl text-[color:var(--ink-strong)]">录入残文</h2>
               </div>
-              <div className="flex gap-2">
-                <button className="flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--line-soft)] text-[color:var(--ink-faint)] transition hover:text-[color:var(--accent)]">
-                  <History className="h-4 w-4" />
-                </button>
-                <button className="flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--line-soft)] text-[color:var(--ink-faint)] transition hover:text-[color:var(--accent)]">
-                  <Info className="h-4 w-4" />
-                </button>
-              </div>
+
             </div>
 
             <div className="mt-6 rounded-[30px] border border-[color:var(--line-soft)] bg-[rgba(255,255,255,0.56)] p-5">
@@ -68,10 +67,10 @@ export default function RestorePage() {
                 value={inputText}
                 onChange={(event) => setInputText(event.target.value)}
                 className="min-h-[220px] w-full resize-none bg-transparent font-ui text-[18px] leading-9 text-[color:var(--ink-strong)]"
-                placeholder="请输入带有缺字标记的《论语》原文。"
+                placeholder="请输入带有 '_' 缺字标记的《论语》原文。"
               />
               <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-[color:var(--line-soft)] pt-5">
-                <p className="text-sm text-[color:var(--ink-faint)]">示例：学而时习之，不亦□乎？</p>
+                <p className="text-sm text-[color:var(--ink-faint)]">示例：学而时习之，不亦_乎？</p>
                 <ActionButton variant="secondary" onClick={handleRestore} disabled={isRestoring}>
                   <Sparkles className="h-4 w-4" />
                   {isRestoring ? '补阙中' : '开始补阙'}
@@ -82,7 +81,7 @@ export default function RestorePage() {
 
           <PaperPanel className="paper-texture px-6 py-6 lg:px-8">
             <div>
-              <p className="text-xs tracking-[0.32em] text-[color:var(--ink-faint)]">RESTORED RESULT</p>
+              <p className="text-xs tracking-[0.32em] text-[color:var(--ink-faint)]">复旧</p>
               <h2 className="mt-2 font-display text-3xl text-[color:var(--ink-strong)]">续写纸面</h2>
             </div>
 
@@ -111,7 +110,10 @@ export default function RestorePage() {
                     ))}
                   </p>
                   <div className="section-divider" />
-                  <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-[22px] border border-[color:var(--line-soft)] bg-[rgba(255,255,255,0.55)] px-4 py-4 text-sm leading-7 text-[color:var(--ink-muted)]">
+                    {result.explanation || '已完成补阙。'}
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-1">
                     {result.evidence.map((item) => (
                       <div key={item} className="rounded-[22px] border border-[color:var(--line-soft)] px-4 py-4 text-sm leading-7 text-[color:var(--ink-muted)]">
                         {item}
@@ -131,11 +133,11 @@ export default function RestorePage() {
 
         <div className="space-y-6">
           <PaperPanel className="paper-grid px-6 py-6">
-            <p className="text-xs tracking-[0.32em] text-[color:var(--ink-faint)]">RITUAL</p>
+            <p className="text-xs tracking-[0.32em] text-[color:var(--ink-faint)]">规则</p>
             <h3 className="mt-2 font-display text-3xl text-[color:var(--ink-strong)]">补阙说明</h3>
             <div className="mt-5 space-y-4 text-sm leading-7 text-[color:var(--ink-muted)]">
-              <p>1. 先以知识库召回相关《论语》章句。</p>
-              <p>2. 再交由模型结合上下文补全缺字与标点。</p>
+              <p>1. 先从知识库中召回相关章句作为补阙参考。</p>
+              <p>2. 由模型结合上下文补全缺字。</p>
               <p>3. 最终返回补阙结果与依据，便于继续人工复核。</p>
             </div>
           </PaperPanel>

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from sqlalchemy import text
@@ -24,14 +22,12 @@ class UserSearchSettingsRecord:
 class UserUISettingsRecord:
     user_id: int
     theme_mode: str
-    music_file_name: str | None
     updated_at: datetime
 
 
 class UserPreferencesService:
-    def __init__(self, engine: Engine, music_dir: str) -> None:
+    def __init__(self, engine: Engine) -> None:
         self.engine = engine
-        self.music_dir = Path(music_dir)
 
     def ensure_tables(self) -> None:
         statement_search = text(
@@ -55,7 +51,6 @@ class UserPreferencesService:
                 id BIGINT PRIMARY KEY AUTO_INCREMENT,
                 user_id BIGINT NOT NULL UNIQUE,
                 theme_mode VARCHAR(16) NOT NULL DEFAULT 'light',
-                music_file_name VARCHAR(255),
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 INDEX idx_user_ui_settings_user_id (user_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -148,7 +143,7 @@ class UserPreferencesService:
     def get_ui_settings(self, user_id: int) -> UserUISettingsRecord:
         statement = text(
             """
-            SELECT user_id, theme_mode, music_file_name, updated_at
+            SELECT user_id, theme_mode, updated_at
             FROM user_ui_settings
             WHERE user_id = :user_id
             LIMIT 1
@@ -161,13 +156,11 @@ class UserPreferencesService:
             return UserUISettingsRecord(
                 user_id=user_id,
                 theme_mode="light",
-                music_file_name=None,
                 updated_at=datetime.now(),
             )
         return UserUISettingsRecord(
             user_id=int(row["user_id"]),
             theme_mode=str(row.get("theme_mode") or "light"),
-            music_file_name=row.get("music_file_name"),
             updated_at=row["updated_at"],
         )
 
@@ -175,18 +168,16 @@ class UserPreferencesService:
         self,
         user_id: int,
         theme_mode: str,
-        music_file_name: str | None,
     ) -> UserUISettingsRecord:
         normalized_mode = (theme_mode or "light").strip().lower()
         if normalized_mode not in {"light", "night"}:
             normalized_mode = "light"
         statement = text(
             """
-            INSERT INTO user_ui_settings (user_id, theme_mode, music_file_name)
-            VALUES (:user_id, :theme_mode, :music_file_name)
+            INSERT INTO user_ui_settings (user_id, theme_mode)
+            VALUES (:user_id, :theme_mode)
             ON DUPLICATE KEY UPDATE
                 theme_mode = VALUES(theme_mode),
-                music_file_name = VALUES(music_file_name),
                 updated_at = CURRENT_TIMESTAMP
             """
         )
@@ -196,21 +187,6 @@ class UserPreferencesService:
                 {
                     "user_id": user_id,
                     "theme_mode": normalized_mode,
-                    "music_file_name": (music_file_name or "").strip() or None,
                 },
             )
         return self.get_ui_settings(user_id)
-
-    def save_music_file(self, user_id: int, filename: str, data: bytes) -> str:
-        suffix = Path(filename).suffix or ".mp3"
-        user_dir = self.music_dir / str(user_id)
-        user_dir.mkdir(parents=True, exist_ok=True)
-        stored_name = f"{uuid.uuid4().hex}{suffix}"
-        (user_dir / stored_name).write_bytes(data)
-        return stored_name
-
-    def get_music_file_path(self, user_id: int, stored_name: str) -> Optional[Path]:
-        file_path = self.music_dir / str(user_id) / stored_name
-        if not file_path.exists():
-            return None
-        return file_path

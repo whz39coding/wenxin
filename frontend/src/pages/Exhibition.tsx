@@ -1307,28 +1307,28 @@ export default function ExhibitionPage() {
 
       <div className="page-shell space-y-8">
         <PageIntro
-          eyebrow="ANCIENT SCROLL"
+          eyebrow="云游观书"
           title="云游书阁"
           description="以古代竹简形式展读已识文典籍。竹简采用橙黄古竹配色，强调规整并列与顶部穿绳结点，贴近传统简牍视觉。支持多种书法字体选择。"
           aside={
             <>
               <div style={{
-                padding: '10px 16px',
+                padding: '18px 16px',
                 background: 'rgba(180,160,110,0.1)',
                 borderRadius: 12,
                 border: `1px solid ${BAMBOO_COLORS.dark}15`,
               }}>
-                <p style={{ fontSize: 10, letterSpacing: '0.2em', color: BAMBOO_COLORS.base, marginBottom: 4 }}>典籍来源</p>
-                <p style={{ fontSize: 12, color: BAMBOO_COLORS.shadow }}>已完成 OCR 识文的上传卷页</p>
+                <p style={{ fontSize: 12, letterSpacing: '0.2em', color: BAMBOO_COLORS.base, marginBottom: 4 }}>典籍来源</p>
+                <p style={{ fontSize: 14, color: BAMBOO_COLORS.shadow }}>已完成 OCR 识文的卷页</p>
               </div>
               <div style={{
-                padding: '10px 16px',
+                padding: '18px 16px',
                 background: 'rgba(180,160,110,0.1)',
                 borderRadius: 12,
                 border: `1px solid ${BAMBOO_COLORS.dark}15`,
               }}>
-                <p style={{ fontSize: 10, letterSpacing: '0.2em', color: BAMBOO_COLORS.base, marginBottom: 4 }}>操作提示</p>
-                <p style={{ fontSize: 12, color: BAMBOO_COLORS.shadow }}>← → 键翻页，F 键全屏</p>
+                <p style={{ fontSize: 12, letterSpacing: '0.2em', color: BAMBOO_COLORS.base, marginBottom: 4 }}>操作提示</p>
+                <p style={{ fontSize: 14, color: BAMBOO_COLORS.shadow }}>← → 键翻页，F 键全屏阅读</p>
               </div>
             </>
           }
@@ -1367,7 +1367,7 @@ export default function ExhibitionPage() {
                   fontSize: 11,
                   letterSpacing: '0.35em',
                   color: BAMBOO_COLORS.shadow,
-                }}>ANCIENT SCROLL</span>
+                }}>竹简木牍</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {/* 字体选择 */}
@@ -1436,11 +1436,11 @@ export default function ExhibitionPage() {
             }}>
               <p style={{
                 fontFamily: currentFontStyle,
-                fontSize: 10,
+                fontSize: 12,
                 letterSpacing: '0.4em',
                 color: BAMBOO_COLORS.base,
                 marginBottom: 12,
-              }}>COLLECTION</p>
+              }}>典籍</p>
               <h3 style={{
                 fontFamily: currentFontStyle,
                 fontSize: 24,
@@ -1480,7 +1480,7 @@ export default function ExhibitionPage() {
                     >
                       <p style={{
                         fontFamily: currentFontStyle,
-                        fontSize: 13,
+                        fontSize: 15,
                         lineHeight: 1.6,
                         color: selectedBookId === book.id ? BAMBOO_COLORS.shadow : BAMBOO_COLORS.dark,
                         overflow: 'hidden',
@@ -1510,14 +1510,14 @@ export default function ExhibitionPage() {
               }}>
                 <p style={{
                   fontFamily: currentFontStyle,
-                  fontSize: 10,
+                  fontSize: 12,
                   letterSpacing: '0.4em',
                   color: BAMBOO_COLORS.base,
                   marginBottom: 12,
-                }}>READING NOW</p>
+                }}>当下展卷</p>
                 <p style={{
                   fontFamily: currentFontStyle,
-                  fontSize: 18,
+                  fontSize:24,
                   color: BAMBOO_COLORS.shadow,
                   marginBottom: 16,
                   overflow: 'hidden',
@@ -1576,12 +1576,12 @@ export default function ExhibitionPage() {
               padding: 20,
             }}>
               <p style={{
-                fontSize: 10,
+                fontSize: 15,
                 letterSpacing: '0.4em',
                 color: BAMBOO_COLORS.dark,
                 opacity: 0.6,
                 marginBottom: 12,
-              }}>GUIDE</p>
+              }}>指引</p>
               <ul style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
                   '← → 方向键翻页',
@@ -1593,7 +1593,7 @@ export default function ExhibitionPage() {
                 ].map((tip) => (
                   <li key={tip} style={{
                     fontFamily: currentFontStyle,
-                    fontSize: 12,
+                    fontSize: 13,
                     lineHeight: 1.7,
                     letterSpacing: '0.05em',
                     color: BAMBOO_COLORS.dark,

@@ -74,17 +74,18 @@ class UserService:
     # 通过邮箱或用户名获取用户
 
     def get_by_identifier(self, identifier: str) -> Optional[UserRecord]:
+        normalized = (identifier or "").strip()
         statement = text(
             """
             SELECT id, username, email, password_hash, created_at
             FROM users
-            WHERE LOWER(email) = LOWER(:identifier) OR username = :identifier
+            WHERE LOWER(email) = LOWER(:identifier) OR LOWER(username) = LOWER(:identifier)
             LIMIT 1
             """
         )
         with self.engine.begin() as conn:
             row = conn.execute(
-                statement, {"identifier": identifier}).mappings().first()
+                statement, {"identifier": normalized}).mappings().first()
         return self._to_user(row)
 
     # 通过id获取用户

@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi import File, UploadFile
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from api.auth import get_current_user
@@ -76,17 +74,10 @@ class UpdateSearchSettingsRequest(BaseModel):
 
 class UISettingsResponse(BaseModel):
     theme_mode: str
-    music_file_name: str | None = None
-    music_url: str | None = None
 
 
 class UpdateUISettingsRequest(BaseModel):
     theme_mode: str = Field(default="light")
-
-
-class UploadMusicResponse(BaseModel):
-    music_file_name: str
-    music_url: str
 
 
 def _build_profile_service() -> ProfileService:
@@ -111,10 +102,7 @@ def _build_preferences_service() -> UserPreferencesService:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="数据库未初始化",
         )
-    return UserPreferencesService(
-        engine=db_manager.mysql_engine,
-        music_dir=os.path.join(config.upload_dir, "settings_music"),
-    )
+    return UserPreferencesService(engine=db_manager.mysql_engine)
 
 
 def _to_search_settings_response(user_id: int, service: UserPreferencesService) -> SearchSettingsResponse:
@@ -142,14 +130,7 @@ def _to_search_settings_response(user_id: int, service: UserPreferencesService) 
 
 def _to_ui_settings_response(user_id: int, service: UserPreferencesService) -> UISettingsResponse:
     settings = service.get_ui_settings(user_id)
-    music_url = None
-    if settings.music_file_name:
-        music_url = f"/api/profile/ui-settings/music/{settings.music_file_name}"
-    return UISettingsResponse(
-        theme_mode=settings.theme_mode,
-        music_file_name=settings.music_file_name,
-        music_url=music_url,
-    )
+    return UISettingsResponse(theme_mode=settings.theme_mode)
 
 
 def _to_upload_response(record: ProfileUploadRecord, include_text: bool = False) -> UploadDetailResponse:
@@ -330,63 +311,8 @@ def update_ui_settings(
     current_user: UserRecord = Depends(get_current_user),
 ) -> UISettingsResponse:
     service = _build_preferences_service()
-    existing = service.get_ui_settings(current_user.id)
     service.upsert_ui_settings(
         user_id=current_user.id,
         theme_mode=payload.theme_mode,
-        music_file_name=existing.music_file_name,
     )
     return _to_ui_settings_response(current_user.id, service)
-
-
-@router.post("/ui-settings/music", response_model=UploadMusicResponse)
-async def upload_ui_music(
-    file: UploadFile = File(...),
-    current_user: UserRecord = Depends(get_current_user),
-) -> UploadMusicResponse:
-    allowed = {"audio/mpeg", "audio/mp3", "audio/wav",
-               "audio/ogg", "audio/x-m4a", "audio/aac", "audio/flac"}
-    if (file.content_type or "").lower() not in allowed:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="仅支持 mp3/wav/ogg/m4a/aac/flac 音频文件",
-        )
-
-    content = await file.read()
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="音频文件不能为空",
-        )
-
-    service = _build_preferences_service()
-    stored_name = service.save_music_file(
-        user_id=current_user.id,
-        filename=file.filename or "background.mp3",
-        data=content,
-    )
-    existing = service.get_ui_settings(current_user.id)
-    service.upsert_ui_settings(
-        user_id=current_user.id,
-        theme_mode=existing.theme_mode,
-        music_file_name=stored_name,
-    )
-    return UploadMusicResponse(
-        music_file_name=stored_name,
-        music_url=f"/api/profile/ui-settings/music/{stored_name}",
-    )
-
-
-@router.get("/ui-settings/music/{stored_name}")
-def get_ui_music_file(
-    stored_name: str,
-    current_user: UserRecord = Depends(get_current_user),
-) -> FileResponse:
-    service = _build_preferences_service()
-    file_path = service.get_music_file_path(current_user.id, stored_name)
-    if file_path is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="音频文件不存在",
-        )
-    return FileResponse(path=file_path)

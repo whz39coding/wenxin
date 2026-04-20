@@ -35,18 +35,18 @@
     --shadow-card: 0 18px 48px rgba(63, 45, 28, 0.08);
   }
 
-  :root[data-theme='dark'] {
-    --paper: #1b1a18;
-    --paper-strong: #23211d;
-    --paper-muted: #2b2823;
-    --ink-strong: #ece4d6;
-    --ink-muted: #c5bba9;
-    --ink-faint: #9e9381;
-    --line-soft: #4b4338;
-    --line-strong: #7f6f58;
-    --accent: #d38e74;
-    --accent-soft: #6f4e43;
-    --warm-gold: #c8a96f;
+  :root[data-theme='eye'] {
+    --paper: #e6f2e3;
+    --paper-strong: #f2f8ef;
+    --paper-muted: #d7e8d3;
+    --ink-strong: #24362a;
+    --ink-muted: #3f5a47;
+    --ink-faint: #698371;
+    --line-soft: #b7cfba;
+    --line-strong: #85aa8e;
+    --accent: #3e7a4f;
+    --accent-soft: #c6e0c7;
+    --warm-gold: #7da872;
   }
 
   * {
@@ -69,11 +69,11 @@
     background-attachment: fixed;
   }
 
-  :root[data-theme='dark'] body {
+  :root[data-theme='eye'] body {
     background:
-      radial-gradient(circle at 8% 12%, rgba(184, 153, 101, 0.09), transparent 24%),
-      radial-gradient(circle at 88% 16%, rgba(154, 76, 57, 0.14), transparent 20%),
-      linear-gradient(180deg, #181612 0%, #171511 52%, #12110f 100%);
+      radial-gradient(circle at 8% 12%, rgba(120, 171, 120, 0.18), transparent 24%),
+      radial-gradient(circle at 88% 16%, rgba(83, 133, 93, 0.16), transparent 20%),
+      linear-gradient(180deg, #edf6eb 0%, #dcecd8 52%, #d0e4cc 100%);
   }
 
   body::before {

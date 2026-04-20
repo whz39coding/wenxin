@@ -157,7 +157,14 @@ def login(payload: LoginRequest) -> AuthResponse:
     service = _build_user_service()
     identifier = _normalize_identifier(payload.identifier)
     user = service.get_by_identifier(identifier)
-    if user is None or not service.verify_password(payload.password, user.password_hash):
+    if user is None:
+        logger.warning("登录失败：未找到账号 identifier=%s", identifier)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
+
+    if not service.verify_password(payload.password, user.password_hash):
+        logger.warning("登录失败：密码不匹配 user_id=%s identifier=%s",
+                       user.id, identifier)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
     logger.info(f"用户登录成功: {user}")

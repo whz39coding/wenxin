@@ -14,7 +14,6 @@ import {
   getStoredToken,
   updateSearchSettings,
   updateUISettings,
-  uploadBackgroundMusic,
   updateProfileSettings,
   updateStoredUser,
   updateProfileUploadExtractedText,
@@ -58,8 +57,6 @@ export default function ProfilePage() {
   const [uiConfigSaving, setUiConfigSaving] = useState(false);
   const [uiConfigError, setUiConfigError] = useState('');
   const [themeMode, setThemeMode] = useState<'light' | 'night'>('light');
-  const [musicFileName, setMusicFileName] = useState('');
-  const [musicUploading, setMusicUploading] = useState(false);
 
   const [searchSettingsLoaded, setSearchSettingsLoaded] = useState(false);
   const [uiSettingsLoaded, setUiSettingsLoaded] = useState(false);
@@ -111,7 +108,7 @@ export default function ProfilePage() {
   const applyThemeMode = useCallback((mode: 'light' | 'night') => {
     const root = document.documentElement;
     if (mode === 'night') {
-      root.setAttribute('data-theme', 'dark');
+      root.setAttribute('data-theme', 'eye');
     } else {
       root.removeAttribute('data-theme');
     }
@@ -142,7 +139,6 @@ export default function ProfilePage() {
         const data: UISettingsResponse = response.data;
         const normalizedMode: 'light' | 'night' = data.theme_mode === 'night' ? 'night' : 'light';
         setThemeMode(normalizedMode);
-        setMusicFileName(data.music_file_name || '');
         applyThemeMode(normalizedMode);
         setUiSettingsLoaded(true);
       })
@@ -243,24 +239,6 @@ export default function ProfilePage() {
       setUiConfigError(toErrorMessage(error, '保存界面配置失败，请稍后重试。'));
     } finally {
       setUiConfigSaving(false);
-    }
-  }
-
-  async function handleUploadMusic(file: File) {
-    setMusicUploading(true);
-    setUiConfigError('');
-    try {
-      const response = await uploadBackgroundMusic(file);
-      setMusicFileName(response.data.music_file_name);
-      setUiSettingsLoaded(true);
-      setSuccessTip({
-        title: '背景音乐已上传',
-        description: '已保存到个性化配置。',
-      });
-    } catch (error) {
-      setUiConfigError(toErrorMessage(error, '音乐上传失败，请更换音频文件后重试。'));
-    } finally {
-      setMusicUploading(false);
     }
   }
 
@@ -755,7 +733,7 @@ export default function ProfilePage() {
 
             <div className="mt-5 space-y-4">
               <div>
-                <p className="mb-2 text-xs tracking-[0.14em] text-[color:var(--ink-faint)]">API Key（默认脱敏展示）</p>
+                <p className="mb-2 text-xs tracking-[0.14em] text-[color:var(--ink-faint)]">API Key（如需编辑,点击右侧小眼睛）</p>
                 <div className="flex items-center gap-2">
                   <input
                     value={showSearchApiKey ? searchApiKey : maskApiKey(searchApiKey)}
@@ -792,7 +770,7 @@ export default function ProfilePage() {
                   placeholder="Base URL（例如 https://dashscope.aliyuncs.com/compatible-mode/v1）"
                 />
               </div>
-              <p className="mb-2 text-xs tracking-[0.14em] text-[color:var(--ink-faint)]">问答提示词（留空则使用系统默认提示词）</p>
+              <p className="mb-2 text-xs tracking-[0.14em] text-[color:var(--ink-faint)]">问答提示词（请勿修改回答格式和英文部分）</p>
               <textarea
                 value={answerPrompt}
                 onChange={(event) => setAnswerPrompt(event.target.value)}
@@ -841,26 +819,11 @@ export default function ProfilePage() {
                 <p className="mb-2 text-xs tracking-[0.14em] text-[color:var(--ink-faint)]">主题模式</p>
                 <div className="flex gap-3">
                   <button type="button" onClick={() => setThemeMode('light')} className={`rounded-full border px-4 py-2 text-xs ${themeMode === 'light' ? 'border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--line-soft)] text-[color:var(--ink-muted)]'}`}>白间</button>
-                  <button type="button" onClick={() => setThemeMode('night')} className={`rounded-full border px-4 py-2 text-xs ${themeMode === 'night' ? 'border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--line-soft)] text-[color:var(--ink-muted)]'}`}>夜间</button>
+                  <button type="button" onClick={() => setThemeMode('night')} className={`rounded-full border px-4 py-2 text-xs ${themeMode === 'night' ? 'border-[color:var(--accent)] text-[color:var(--accent)]' : 'border-[color:var(--line-soft)] text-[color:var(--ink-muted)]'}`}>护眼</button>
                 </div>
               </div>
 
-              <div>
-                <p className="mb-2 text-xs tracking-[0.14em] text-[color:var(--ink-faint)]">上传背景音乐</p>
-                <input
-                  type="file"
-                  accept="audio/*"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      void handleUploadMusic(file);
-                    }
-                  }}
-                  className="w-full rounded-[12px] border border-[color:var(--line-soft)] bg-[rgba(255,255,255,0.78)] px-3 py-2 text-sm"
-                />
-                <p className="mt-2 text-xs text-[color:var(--ink-faint)]">当前音乐：{musicFileName || '未上传'}</p>
-                {musicUploading ? <p className="mt-1 text-xs text-[color:var(--accent)]">音乐上传中...</p> : null}
-              </div>
+              <p className="text-xs text-[color:var(--ink-faint)]">背景音乐为系统内置音轨，可在右下角播放器中切换与调节音量。</p>
             </div>
 
             {uiConfigError ? (

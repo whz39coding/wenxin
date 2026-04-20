@@ -38,7 +38,7 @@ export default function Home() {
               </div>
 
               <div className="space-y-4">
-                <p className="text-xs tracking-[0.35em] text-[color:var(--ink-faint)]">&nbsp;&nbsp;&nbsp;&nbsp;WEN &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;XIN &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SHI&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DIAN</p>
+                <p className="text-xs tracking-[0.35em] text-[color:var(--ink-faint)]">&nbsp;&nbsp;&nbsp;&nbsp;WEN &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;XIN &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; SHI&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; DIAN</p>
                 <h1 className="font-display text-5xl leading-none text-[color:var(--ink-strong)] sm:text-6xl lg:text-8xl">
                   {brand.name}
                 </h1>
@@ -116,7 +116,7 @@ export default function Home() {
                       </div>
                     </div>
                   ) : null}
-                  <p className="text-xs tracking-[0.2em] text-[color:var(--accent)]">建议佩戴耳机 · 进入沉浸模式</p>
+                  <p className="text-xs tracking-[0.2em] text-[color:var(--accent)]">静心聆读 · 感受古意流转</p>
                 </div>
               </div>
             </div>

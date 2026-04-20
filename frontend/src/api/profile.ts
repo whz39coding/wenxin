@@ -42,13 +42,6 @@ export type UpdateSearchSettingsPayload = {
 
 export type UISettingsResponse = {
     theme_mode: 'light' | 'night' | string;
-    music_file_name?: string | null;
-    music_url?: string | null;
-};
-
-export type UploadMusicResponse = {
-    music_file_name: string;
-    music_url: string;
 };
 
 export type UpdateProfileSettingsPayload = {
@@ -98,12 +91,4 @@ export function getUISettings() {
 
 export function updateUISettings(themeMode: 'light' | 'night') {
     return api.put<UISettingsResponse>('/profile/ui-settings', { theme_mode: themeMode });
-}
-
-export function uploadBackgroundMusic(file: File) {
-    const form = new FormData();
-    form.append('file', file);
-    return api.post<UploadMusicResponse>('/profile/ui-settings/music', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-    });
 }

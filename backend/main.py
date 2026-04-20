@@ -1,3 +1,17 @@
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from starlette import status
+from core.database import db_manager
+from core.exceptions import register_exception_handlers, AppError
+from core.logger import setup_logging, get_logger
+from api import auth_router, exhibition_router, ocr_router, portal_router, profile_router, restore_router, search_router, uploads_router
+from core.security import verify_access_token
+from services.users import UserService
+from services.upload_book import UploadService
+from services.preferences import UserPreferencesService
 import os
 import pysqlite3
 import sys
@@ -6,20 +20,6 @@ sys.modules["sqlite3"] = pysqlite3
 # 在任何模型加载之前，强制设置 HuggingFace 离线模式
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
-from services.preferences import UserPreferencesService
-from services.upload_book import UploadService
-from services.users import UserService
-from core.security import verify_access_token
-from api import auth_router, exhibition_router, ocr_router, portal_router, profile_router, search_router, uploads_router
-from core.logger import setup_logging, get_logger
-from core.exceptions import register_exception_handlers, AppError
-from core.database import db_manager
-from starlette import status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi import FastAPI, Request
-from typing import AsyncGenerator
-from contextlib import asynccontextmanager
 
 # 初始化日志系统
 setup_logging(
@@ -32,6 +32,7 @@ setup_logging(
 logger = get_logger(__name__)
 
 AUTH_WHITELIST = {
+    "/api/auth",
     "/api/auth/login",
     "/api/auth/register",
     '/api/health'
@@ -96,10 +97,7 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
     UserService(db_manager.mysql_engine).ensure_user_table()  # 确保用户表存在
     UploadService(db_manager.mysql_engine,
                   config.upload_dir).ensure_upload_table()  # 确保上传记录表存在
-    UserPreferencesService(
-        db_manager.mysql_engine,
-        os.path.join(config.upload_dir, "settings_music"),
-    ).ensure_tables()
+    UserPreferencesService(db_manager.mysql_engine).ensure_tables()
 
     logger.info("数据库连接正常")
     yield
@@ -200,6 +198,8 @@ app.include_router(profile_router, prefix="/api")
 app.include_router(exhibition_router, prefix="/api")
 # 添加寻章问义路由
 app.include_router(search_router, prefix="/api")
+# 添加残篇补阙路由
+app.include_router(restore_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["system"])

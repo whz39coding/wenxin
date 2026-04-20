@@ -5,7 +5,7 @@ import './index.css';
 
 const savedThemeMode = window.localStorage.getItem('wenxin_theme_mode');
 if (savedThemeMode === 'night') {
-  document.documentElement.setAttribute('data-theme', 'dark');
+  document.documentElement.setAttribute('data-theme', 'eye');
 } else {
   document.documentElement.removeAttribute('data-theme');
 }

@@ -83,14 +83,18 @@ api.interceptors.response.use(
 );
 
 export function saveAuth(accessToken: string, user: AuthUser) {
+    pendingAuthRequiredMessage = null;
     window.localStorage.setItem(TOKEN_KEY, accessToken);
     window.localStorage.setItem(USER_KEY, JSON.stringify(user));
     window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT));
 }
 
 export function clearAuth() {
+    pendingAuthRequiredMessage = null;
     window.localStorage.removeItem(TOKEN_KEY);
     window.localStorage.removeItem(USER_KEY);
+    window.localStorage.removeItem('wenxin_theme_mode');
+    document.documentElement.removeAttribute('data-theme');
     window.dispatchEvent(new Event(AUTH_STATE_CHANGE_EVENT));
 }
 

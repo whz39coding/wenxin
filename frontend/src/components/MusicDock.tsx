@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Music2, Pause, Volume2 } from 'lucide-react';
+import { Music2, Pause, SkipForward, Volume2 } from 'lucide-react';
+import { Howl } from 'howler';
 
 const audioModules = import.meta.glob('../assets/audio/*.{mp3,wav,ogg,m4a,aac,flac}', {
   eager: true,
@@ -7,51 +8,147 @@ const audioModules = import.meta.glob('../assets/audio/*.{mp3,wav,ogg,m4a,aac,fl
   query: '?url',
 }) as Record<string, string>;
 
-const firstTrack = Object.values(audioModules)[0] ?? '';
+const VOLUME_STORAGE_KEY = 'wenxin_music_volume';
+const TRACK_INDEX_STORAGE_KEY = 'wenxin_music_track_index';
+
+type TrackItem = {
+  id: string;
+  label: string;
+  src: string;
+};
+
+function normalizeVolume(raw: string | null) {
+  const parsed = Number(raw ?? '0.22');
+  if (Number.isNaN(parsed)) {
+    return 0.22;
+  }
+  return Math.min(1, Math.max(0, parsed));
+}
+
+function normalizeTrackIndex(raw: string | null, maxExclusive: number) {
+  const parsed = Number(raw ?? '0');
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return 0;
+  }
+  if (parsed >= maxExclusive) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+function buildBuiltinTracks(): TrackItem[] {
+  return Object.entries(audioModules)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([path, url], index) => ({
+      id: `builtin-${index}`,
+      label: `内置 ${index + 1}`,
+      src: url,
+    }));
+}
 
 function useAmbientMusic() {
   const [enabled, setEnabled] = useState(false);
-  const [volume, setVolume] = useState(0.22);
+  const [volume, setVolume] = useState(() => normalizeVolume(window.localStorage.getItem(VOLUME_STORAGE_KEY)));
   const [error, setError] = useState('');
-  const [hasTrack, setHasTrack] = useState(Boolean(firstTrack));
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [tracks, setTracks] = useState<TrackItem[]>([]);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [trackSourceLabel, setTrackSourceLabel] = useState('');
+  const howlRef = useRef<Howl | null>(null);
 
-  useEffect(() => {
-    if (!firstTrack) {
-      setHasTrack(false);
-      setError('未检测到音频文件，请将 mp3/wav 放入 src/assets/audio。');
+  const hasTrack = tracks.length > 0;
+
+  function cleanupHowl() {
+    if (howlRef.current) {
+      howlRef.current.unload();
+      howlRef.current = null;
+    }
+  }
+
+  function createHowl(track: TrackItem, autoplay: boolean) {
+    cleanupHowl();
+
+    const howl = new Howl({
+      src: [track.src],
+      html5: true,
+      preload: true,
+      loop: true,
+      volume,
+      onplay: () => {
+        setEnabled(true);
+        setError('');
+      },
+      onpause: () => setEnabled(false),
+      onstop: () => setEnabled(false),
+      onloaderror: () => {
+        setEnabled(false);
+        setError('当前音轨加载失败，请尝试切换下一首。');
+      },
+      onplayerror: () => {
+        setEnabled(false);
+        setError('浏览器阻止了自动播放，请再次点击播放按钮。');
+      },
+    });
+
+    howlRef.current = howl;
+    setTrackSourceLabel(track.label);
+
+    if (autoplay) {
+      howl.play();
+    }
+  }
+
+  function switchTrack(nextIndex: number, autoplay: boolean) {
+    if (!tracks.length) {
       return;
     }
+    const normalized = ((nextIndex % tracks.length) + tracks.length) % tracks.length;
+    setCurrentTrackIndex(normalized);
+    window.localStorage.setItem(TRACK_INDEX_STORAGE_KEY, String(normalized));
+    createHowl(tracks[normalized], autoplay);
+  }
 
-    const audio = new Audio(firstTrack);
-    audio.loop = true;
-    audio.preload = 'auto';
-    audio.volume = volume;
-    audioRef.current = audio;
-    setHasTrack(true);
+  useEffect(() => {
+    const builtins = buildBuiltinTracks();
+
+    if (!builtins.length) {
+      setError('未检测到音频文件，请将 mp3/wav 放入 src/assets/audio。');
+      setTracks([]);
+      return () => {
+        cleanupHowl();
+      };
+    }
+
+    setTracks(builtins);
+    const savedIndex = normalizeTrackIndex(
+      window.localStorage.getItem(TRACK_INDEX_STORAGE_KEY),
+      builtins.length,
+    );
+    setCurrentTrackIndex(savedIndex);
+    createHowl(builtins[savedIndex], false);
 
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-        audioRef.current = null;
-      }
+      cleanupHowl();
     };
   }, []);
 
+  useEffect(() => {
+    window.localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+  }, [volume]);
+
   async function toggle() {
-    if (!audioRef.current) {
+    const howl = howlRef.current;
+    if (!howl) {
       return;
     }
 
-    if (enabled) {
-      audioRef.current.pause();
+    if (howl.playing()) {
+      howl.pause();
       setEnabled(false);
       return;
     }
 
     try {
-      await audioRef.current.play();
+      howl.play();
       setEnabled(true);
       setError('');
     } catch {
@@ -60,17 +157,25 @@ function useAmbientMusic() {
     }
   }
 
+  function switchNextTrack() {
+    if (!tracks.length) {
+      return;
+    }
+    const shouldAutoplay = howlRef.current?.playing() ?? false;
+    switchTrack(currentTrackIndex + 1, shouldAutoplay);
+  }
+
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
+    if (howlRef.current) {
+      howlRef.current.volume(volume);
     }
   }, [volume]);
 
-  return { enabled, volume, setVolume, toggle, error, hasTrack };
+  return { enabled, volume, setVolume, toggle, switchNextTrack, error, hasTrack, trackSourceLabel };
 }
 
 export default function MusicDock() {
-  const { enabled, volume, setVolume, toggle, error, hasTrack } = useAmbientMusic();
+  const { enabled, volume, setVolume, toggle, switchNextTrack, error, hasTrack, trackSourceLabel } = useAmbientMusic();
   const [nearRightEdge, setNearRightEdge] = useState(false);
   const [hoveringDock, setHoveringDock] = useState(false);
   const [finePointer, setFinePointer] = useState(false);
@@ -141,6 +246,7 @@ export default function MusicDock() {
           </div>
         </div>
         {error ? <p className="mt-2 text-xs text-[color:var(--accent)]">{error}</p> : null}
+        {!error && hasTrack ? <p className="mt-2 text-xs text-[color:var(--ink-faint)]">音源：{trackSourceLabel}</p> : null}
       </div>
     </div>
   );

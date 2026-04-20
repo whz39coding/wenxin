@@ -41,10 +41,14 @@ export default function AuthPage() {
     setMessage('');
 
     try {
+      const normalizedIdentifier = identifier.trim();
+      const normalizedUsername = username.trim();
+      const normalizedEmail = email.trim();
+
       const response =
         mode === 'login'
-          ? await login({ identifier, password })
-          : await register({ username, email, password });
+          ? await login({ identifier: normalizedIdentifier, password })
+          : await register({ username: normalizedUsername, email: normalizedEmail, password });
 
       saveAuth(response.data.access_token, response.data.user);
       setMessage(mode === 'login' ? '已进入书馆，正返回首页。' : '已创建书斋，正返回首页。');

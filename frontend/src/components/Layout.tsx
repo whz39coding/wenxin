@@ -12,6 +12,7 @@ import { cn } from '../lib/utils';
 export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const isAuthPage = location.pathname === '/auth';
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => getStoredUser());
   const [nearRightEdge, setNearRightEdge] = useState(false);
   const [hoveringQuickNav, setHoveringQuickNav] = useState(false);
@@ -42,12 +43,19 @@ export default function Layout({ children }: { children: ReactNode }) {
   }, [location.pathname]);
 
   useEffect(() => {
+    if (isAuthPage) {
+      return;
+    }
+
     const pendingMessage = consumePendingAuthRequiredMessage();
     if (pendingMessage) {
       setAuthPrompt({ open: true, message: pendingMessage });
     }
 
     const onAuthRequired = (event: Event) => {
+      if (location.pathname === '/auth') {
+        return;
+      }
       const customEvent = event as CustomEvent<{ message?: string }>;
       const message = customEvent.detail?.message || '当前操作需要先登录，请先登录后再试。';
       setAuthPrompt({
@@ -60,14 +68,19 @@ export default function Layout({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener(AUTH_REQUIRED_EVENT, onAuthRequired as EventListener);
     };
-  }, []);
+  }, [isAuthPage, location.pathname]);
 
   useEffect(() => {
+    if (isAuthPage) {
+      setAuthPrompt((prev) => (prev.open ? { ...prev, open: false } : prev));
+      return;
+    }
+
     const pendingMessage = consumePendingAuthRequiredMessage();
     if (pendingMessage) {
       setAuthPrompt({ open: true, message: pendingMessage });
     }
-  }, [location.pathname]);
+  }, [isAuthPage, location.pathname]);
 
   useEffect(() => {
     const token = getStoredToken();
@@ -324,8 +337,8 @@ export default function Layout({ children }: { children: ReactNode }) {
                 </div>
               ) : null}
               <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--ink-muted)]">
-                {brand.name} · {brand.edition} 以 OCR、RAG、残卷修复、语义检索、数字展厅与知识问答为核心，
-                围绕《论语》的识、补、问、游而展开。
+                {brand.name} · {brand.edition} 以 OCR、RAG、残卷修复、语义检索与知识问答为核心，
+                围绕《论语》的识、补、问、观而展开。
               </p>
             </div>
             {/* <div className="flex flex-wrap gap-3">

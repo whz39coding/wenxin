@@ -216,8 +216,8 @@ export default function OCRPage() {
         description="识文功能会读取你书阁中待读取的卷页文件，并将其中可识别的文字保存为后续补阙、问义的知识基础。"
         aside={
           <>
-            <MetaBlock label="溯源" value="图片优先调用Paddle OCR模型进行提取文本；PDF 若本身带文本层，会先直接提取真实内容。" />
-            <MetaBlock label="输出" value="识文结果会回写到上传记录；若无法识别，会明确提示原因，不会存入后续知识库。" />
+            <MetaBlock label="溯源" value="图片调用OCR模型进行提取文本；PDF 若本身带文本层，会直接提取真实内容。" />
+            <MetaBlock label="输出" value="识文结果存入知识库为后续问答提供上下文参考；入库知识可在书阁中修改查看。" />
           </>
         }
       />
