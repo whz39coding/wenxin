@@ -38,6 +38,11 @@ class OCRService:
         self.collection_prefix = collection_prefix
         self._encoder = None
         self._rapid_ocr = None
+        self._max_image_pixels = config.ocr_max_image_pixels
+        self._max_image_width = config.ocr_max_image_width
+        self._max_image_height = config.ocr_max_image_height
+        self._pdf_render_scale = config.ocr_pdf_render_scale
+        self._pdf_max_pages = config.ocr_pdf_max_pages
         self.tok = ClassicalChineseTokenizer(
             min_len=8,
             max_len=60,
@@ -123,10 +128,17 @@ class OCRService:
                 print(text)
                 print("=====pdf text end=======")
                 return text, "pypdf-text-layer"
-            # PDF 没有文本层时，回退到 OCR。
-            logger.warning("PDF文件无文本层，RapidOCR仅支持图片输入")
-            raise ValueError("当前仅支持图片OCR；PDF请使用含文本层文件或先转图片")
+            # PDF 没有文本层时，回退到按页渲染图片后 OCR。
+            logger.warning("PDF文件无文本层，回退到图片页OCR")
+            pdf_image_text = self._extract_pdf_image_layer_text(file_path)
+            if pdf_image_text.strip():
+                return pdf_image_text, "rapidocr-pdf-image-layer"
+            raise ValueError("PDF未识别到有效文本，请更换更清晰文件或减少页面内容")
         logger.info(f"文件类型: {content_type}")
+        if self._is_text_file(content_type, file_path):
+            text = self._extract_plain_text(file_path)
+            return text, "plain-text-direct"
+
         if content_type.startswith("image/"):
             text = self._extract_image_like_text(file_path)
             return text, "rapidocr"
@@ -134,6 +146,50 @@ class OCRService:
         logger.error(
             f"文件类型超出,无法进行OCR: upload_path={file_path} content_type={content_type}")
         raise ValueError(f"当前文件类型暂不支持识文: {content_type}")
+
+    @staticmethod
+    def _is_text_file(content_type: str, file_path: Path) -> bool:
+        normalized = (content_type or "").strip().lower()
+        if normalized == "text/plain":
+            return True
+        # 某些浏览器或文件夹上传时会给 txt 标记成 application/octet-stream
+        if file_path.suffix.lower() == ".txt" and normalized in {"", "application/octet-stream", "text/plain"}:
+            return True
+        return False
+
+    def _extract_plain_text(self, file_path: Path) -> str:
+        try:
+            raw = file_path.read_bytes()
+        except Exception as exc:
+            raise RuntimeError(f"读取 TXT 文件失败: {exc}") from exc
+
+        if not raw:
+            return ""
+
+        # 先尝试常见编码，失败后使用 chardet 兜底识别。
+        preferred_encodings = ["utf-8-sig", "utf-8", "gb18030", "gbk", "big5"]
+        for encoding in preferred_encodings:
+            try:
+                text = raw.decode(encoding)
+                logger.info("TXT 读取成功，编码=%s", encoding)
+                return self._normalize_layout_text(text)
+            except UnicodeDecodeError:
+                continue
+
+        try:
+            chardet_module = importlib.import_module("chardet")
+            detected = chardet_module.detect(raw)
+            detected_encoding = str(detected.get("encoding") or "").strip()
+            if detected_encoding:
+                text = raw.decode(detected_encoding, errors="replace")
+                logger.info("TXT 读取成功，chardet编码=%s", detected_encoding)
+                return self._normalize_layout_text(text)
+        except Exception as exc:
+            logger.warning("TXT 编码识别失败，回退 replace 解码: %s", exc)
+
+        text = raw.decode("utf-8", errors="replace")
+        logger.warning("TXT 使用 utf-8 replace 解码")
+        return self._normalize_layout_text(text)
     # 对pdf格式的文件进行OCR识别
 
     def _extract_pdf_text(self, file_path: Path) -> str:
@@ -150,6 +206,67 @@ class OCRService:
             pages.append(page.extract_text() or "")
         logger.info(f"成功提取pdf文件文本: {len(pages)} 页")
         return self._normalize_layout_text("\n".join(pages))
+
+    def _extract_pdf_image_layer_text(self, file_path: Path) -> str:
+        try:
+            pdfium_module = importlib.import_module("pypdfium2")
+        except ImportError as exc:
+            raise RuntimeError(
+                "缺少 pypdfium2 依赖，无法对图片型 PDF 进行 OCR"
+            ) from exc
+
+        document = pdfium_module.PdfDocument(str(file_path))
+        page_count = len(document)
+        if page_count == 0:
+            return ""
+
+        if page_count > self._pdf_max_pages:
+            raise ValueError(
+                f"PDF页数过多（{page_count}页），请拆分后再识别（最多 {self._pdf_max_pages} 页）"
+            )
+
+        texts: list[str] = []
+        for index in range(page_count):
+            page = document[index]
+            page_no = index + 1
+
+            width_px, height_px = self._estimate_pdf_page_pixels(
+                page=page,
+                scale=self._pdf_render_scale,
+            )
+            print(f"PDF第{page_no}页分辨率: {width_px}x{height_px}")
+            self._ensure_image_safe(
+                width=width_px,
+                height=height_px,
+                source=f"PDF第{page_no}页",
+            )
+
+            try:
+                bitmap = page.render(scale=self._pdf_render_scale)
+                page_image = bitmap.to_numpy()
+            except Exception as exc:
+                raise RuntimeError(f"PDF第{page_no}页渲染失败: {exc}") from exc
+
+            page_text = self._extract_image_array_text(
+                image_array=page_image,
+                source=f"PDF第{page_no}页",
+            )
+            if page_text.strip():
+                texts.append(page_text)
+
+        logger.info("图片型PDF OCR完成，共识别 %d/%d 页", len(texts), page_count)
+        return self._normalize_layout_text("\n".join(texts))
+
+    def _estimate_pdf_page_pixels(self, page: Any, scale: float) -> tuple[int, int]:
+        try:
+            width_pt, height_pt = page.get_size()
+            width_px = max(1, int(float(width_pt) * float(scale)))
+            height_px = max(1, int(float(height_pt) * float(scale)))
+            return width_px, height_px
+        except Exception:
+            # 如果无法预估尺寸，返回保守值让后续渲染后再校验。
+            fallback_side = int(1000 * max(1.0, scale))
+            return fallback_side, fallback_side
 
     @staticmethod
     def _is_isolated_punctuation(line: str) -> bool:
@@ -179,6 +296,14 @@ class OCRService:
             else:
                 merged.append(line)
         return "\n".join(merged)
+
+    @staticmethod
+    def _postprocess_ocr_text(text: str) -> str:
+        """对 OCR 易错词做轻量纠正。"""
+        normalized = text or ""
+        # 论语常见误识别：子曰 -> 子日
+        normalized = normalized.replace("子日", "子曰")
+        return normalized
 
     @staticmethod
     def _should_join_layout_line(prev: str, curr: str) -> bool:
@@ -256,6 +381,10 @@ class OCRService:
         if not file_path.exists():
             raise FileNotFoundError(f"文件不存在: {file_path}")
 
+        width, height = self._read_image_size(file_path)
+        self._ensure_image_safe(
+            width=width, height=height, source=file_path.name)
+
         ocr_engine = self._get_rapid_ocr()
 
         try:
@@ -277,7 +406,51 @@ class OCRService:
             )
 
         logger.info("成功提取图像文件文本，共 %d 行", len(lines))
-        return self._normalize_layout_text("\n".join(lines))
+        normalized = self._normalize_layout_text("\n".join(lines))
+        return self._postprocess_ocr_text(normalized)
+
+    def _extract_image_array_text(self, image_array: Any, source: str) -> str:
+        height = int(getattr(image_array, "shape", [0, 0])[0] or 0)
+        width = int(getattr(image_array, "shape", [0, 0])[1] or 0)
+        if width <= 0 or height <= 0:
+            raise RuntimeError(f"{source} 图像数据无效")
+
+        self._ensure_image_safe(width=width, height=height, source=source)
+
+        ocr_engine = self._get_rapid_ocr()
+        try:
+            results, _ = ocr_engine(image_array)
+        except Exception as exc:
+            raise RuntimeError(f"{source} OCR执行失败: {exc}") from exc
+
+        lines: list[str] = []
+        for res in results or []:
+            text = self._extract_text_from_rapid_result_item(res)
+            if text:
+                lines.append(text)
+        normalized = self._normalize_layout_text("\n".join(lines))
+        return self._postprocess_ocr_text(normalized)
+
+    def _read_image_size(self, file_path: Path) -> tuple[int, int]:
+        try:
+            pil_module = importlib.import_module("PIL.Image")
+        except Exception as exc:
+            raise RuntimeError("缺少 Pillow 依赖，无法进行图像尺寸安全检查") from exc
+
+        try:
+            with pil_module.open(str(file_path)) as image:
+                width, height = image.size
+            return int(width), int(height)
+        except Exception as exc:
+            raise RuntimeError(f"读取图像尺寸失败: {exc}") from exc
+
+    def _ensure_image_safe(self, width: int, height: int, source: str) -> None:
+        pixels = int(width) * int(height)
+        if width > self._max_image_width or height > self._max_image_height or pixels > self._max_image_pixels:
+            raise ValueError(
+                f"图片尺寸过大（{width}x{height}），OCR识别效果不佳，请不要上传长截图. "
+                f"不超过{self._max_image_width}x{self._max_image_height}"
+            )
 
     # 获取 RapidOCR 模型
     def _get_rapid_ocr(self):

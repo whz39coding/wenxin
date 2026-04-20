@@ -53,6 +53,13 @@ class Settings:
     log_max_bytes: int
     log_backup_count: int
 
+    # ocr识别配置
+    ocr_max_image_pixels: int
+    ocr_max_image_width: int
+    ocr_max_image_height: int
+    ocr_pdf_render_scale: float
+    ocr_pdf_max_pages : int
+
     @property
     def mysql_url(self) -> str:
         return (
@@ -93,4 +100,9 @@ config = Settings(
     log_dir=os.path.join(BASE_DIR, "logs"),
     log_max_bytes=int(os.getenv("LOG_MAX_BYTES", 10 * 1024 * 1024)),  # 默认10MB
     log_backup_count=int(os.getenv("LOG_BACKUP_COUNT", "5")),
+    ocr_max_image_pixels=int(os.getenv("OCR_MAX_IMAGE_PIXELS", "4000000")),
+    ocr_max_image_width=int(os.getenv("OCR_MAX_IMAGE_WIDTH", "2000")),
+    ocr_max_image_height=int(os.getenv("OCR_MAX_IMAGE_HEIGHT", "2000")),
+    ocr_pdf_render_scale=float(os.getenv("OCR_PDF_RENDER_SCALE", "1.8")),
+    ocr_pdf_max_pages=int(os.getenv("OCR_PDF_MAX_PAGES", "80")),
 )

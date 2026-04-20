@@ -40,7 +40,7 @@ def _build_upload_service() -> UploadService:
 
 
 def _to_upload_response(record: UploadRecord) -> UploadResponse:
-    preview_mode = _resolve_preview_mode(record.content_type)
+    preview_mode = _resolve_preview_mode(record.content_type, record.filename)
     return UploadResponse(
         id=record.id,
         filename=record.filename,
@@ -56,11 +56,16 @@ def _to_upload_response(record: UploadRecord) -> UploadResponse:
     )
 
 
-def _resolve_preview_mode(content_type: str) -> str:
-    if content_type.startswith("image/"):
+def _resolve_preview_mode(content_type: str, filename: str) -> str:
+    normalized_content_type = (content_type or "").strip().lower()
+    lower_name = (filename or "").strip().lower()
+
+    if normalized_content_type.startswith("image/"):
         return "image"
-    if content_type == "application/pdf":
+    if normalized_content_type == "application/pdf":
         return "pdf"
+    if normalized_content_type == "text/plain" or lower_name.endswith(".txt"):
+        return "text"
     return "unsupported"
 
 
@@ -71,11 +76,11 @@ async def upload_file(
     file: UploadFile = File(...),
     current_user: UserRecord = Depends(get_current_user),
 ) -> UploadResponse:
-    """上传单个卷页文件（JPG / PNG / WebP / PDF），大小上限 20 MB。"""
+    """上传单个卷页文件（JPG / PNG / PDF / TXT），大小上限 50 MB。"""
     data = await file.read()
     content_type = file.content_type or ""
 
-    error = validate_upload(content_type, len(data))
+    error = validate_upload(content_type, len(data), file.filename or "")
     if error:
         logger.error("上传文件失败: {error}")
         raise HTTPException(

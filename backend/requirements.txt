@@ -11,6 +11,8 @@ starlette
 pypdf
 rapidocr_onnxruntime
 opencv-python-headless
+pypdfium2
+Pillow
 sentence-transformers
 langchain-openai
 langchain-core

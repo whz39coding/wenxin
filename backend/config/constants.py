@@ -11,6 +11,7 @@ ALLOWED_UPLOAD_EXTENSIONS: frozenset[str] = frozenset({
     "image/jpeg",
     "image/png",
     "application/pdf",
+    "text/plain",
 })
 # 单文件大小上限：20 MB
 MAX_FILE_BYTES: int = 50 * 1024 * 1024

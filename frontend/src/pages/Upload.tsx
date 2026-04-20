@@ -1,5 +1,5 @@
 // 上传的界面
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, ExternalLink, FileText, Image as ImageIcon, UploadCloud, X } from 'lucide-react';
 import { PageIntro, PaperPanel, ActionButton, BlockingOverlay, MetaBlock, SuccessOverlay } from '../components/ui';
 import { getStoredToken, getUploadContent, listUploads, uploadFile } from '../api';
@@ -8,7 +8,7 @@ type UploadItem = {
   id: number;
   filename: string;
   content_type: string;
-  preview_mode: 'image' | 'pdf' | 'unsupported';
+  preview_mode: 'image' | 'pdf' | 'text' | 'unsupported';
   file_size: number;
   extracted_text?: string | null;
   created_at: string;
@@ -20,10 +20,12 @@ type UploadEntry = {
 };
 
 const uploadTips = [
-  '支持 JPG、PNG、PDF 等常见卷页格式。',
+  '支持 PDF、TXT 及文件夹导入（自动筛选）。',
   '建议使用光线均匀、边缘完整的单页扫描。',
   '竖排古籍与繁体文字场景已做专项识别优化。',
 ];
+
+const ACCEPTED_EXTENSIONS = ['.pdf', '.txt'];
 
 export default function UploadPage() {
   const [isDragging, setIsDragging] = useState(false);
@@ -31,6 +33,8 @@ export default function UploadPage() {
   const [uploadedItems, setUploadedItems] = useState<UploadItem[]>([]);
   const [selectedUploadedId, setSelectedUploadedId] = useState<number | null>(null);
   const [uploadedPreviewUrl, setUploadedPreviewUrl] = useState('');
+  const [uploadedPreviewText, setUploadedPreviewText] = useState('');
+  const [queuePreviewText, setQueuePreviewText] = useState('');
   const [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false);
   const [successTip, setSuccessTip] = useState<{
@@ -39,12 +43,17 @@ export default function UploadPage() {
     linkTo?: string;
     linkLabel?: string;
   } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   const queuePreviewEntry = entries[0] || null;
   const selectedUploadedItem = useMemo(
     () => uploadedItems.find((item) => item.id === selectedUploadedId) || null,
     [selectedUploadedId, uploadedItems],
   );
+
+  const isTxtFilename = (name: string) => name.toLowerCase().endsWith('.txt');
+  const isTxtMime = (mime: string) => (mime || '').toLowerCase().includes('text/plain');
 
   const previewImageUrl = queuePreviewEntry?.file.type.startsWith('image/')
     ? queuePreviewEntry.previewUrl || ''
@@ -55,6 +64,11 @@ export default function UploadPage() {
     ? queuePreviewEntry.previewUrl || ''
     : selectedUploadedItem?.preview_mode === 'pdf'
       ? uploadedPreviewUrl
+      : '';
+  const previewTextContent = (queuePreviewEntry && isTxtFilename(queuePreviewEntry.file.name))
+    ? queuePreviewText
+    : selectedUploadedItem?.preview_mode === 'text'
+      ? uploadedPreviewText
       : '';
   const previewTitle = queuePreviewEntry?.file.name || selectedUploadedItem?.filename || '卷页预览';
 
@@ -87,23 +101,36 @@ export default function UploadPage() {
   useEffect(() => {
     if (!selectedUploadedId || !getStoredToken()) {
       setUploadedPreviewUrl('');
+      setUploadedPreviewText('');
       return;
     }
 
     let cancelled = false;
     let objectUrl = '';
+    const selectedMode = selectedUploadedItem?.preview_mode;
 
     getUploadContent(selectedUploadedId)
-      .then((response) => {
+      .then(async (response) => {
         if (cancelled) {
           return;
         }
+        if (selectedMode === 'text') {
+          setUploadedPreviewUrl('');
+          const text = await response.data.text();
+          if (!cancelled) {
+            setUploadedPreviewText(text);
+          }
+          return;
+        }
+
+        setUploadedPreviewText('');
         objectUrl = URL.createObjectURL(response.data);
         setUploadedPreviewUrl(objectUrl);
       })
       .catch(() => {
         if (!cancelled) {
           setUploadedPreviewUrl('');
+          setUploadedPreviewText('');
         }
       });
 
@@ -113,7 +140,32 @@ export default function UploadPage() {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [selectedUploadedId]);
+  }, [selectedUploadedId, selectedUploadedItem?.preview_mode]);
+
+  useEffect(() => {
+    if (!queuePreviewEntry || !isTxtFilename(queuePreviewEntry.file.name)) {
+      setQueuePreviewText('');
+      return;
+    }
+
+    let cancelled = false;
+    queuePreviewEntry.file
+      .text()
+      .then((text) => {
+        if (!cancelled) {
+          setQueuePreviewText(text);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setQueuePreviewText('TXT 内容读取失败');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queuePreviewEntry]);
 
   useEffect(() => {
     if (!successTip) {
@@ -124,11 +176,36 @@ export default function UploadPage() {
   }, [successTip]);
 
   const appendFiles = (files: FileList | File[]) => {
-    const nextEntries = Array.from(files).map((file) => ({
+    const all = Array.from(files);
+    const accepted = all.filter((file) => {
+      const lowerName = file.name.toLowerCase();
+      return ACCEPTED_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
+    });
+
+    if (accepted.length === 0) {
+      setMessage('仅支持 PDF、TXT 或包含这两类文件的文件夹。');
+      return;
+    }
+
+    if (accepted.length < all.length) {
+      setMessage(`已过滤 ${all.length - accepted.length} 个非 PDF/TXT 文件。`);
+    } else {
+      setMessage('');
+    }
+
+    const nextEntries = accepted.map((file) => ({
       file,
-      previewUrl: file.type.startsWith('image/') || file.type.includes('pdf') ? URL.createObjectURL(file) : undefined,
+      previewUrl: file.type.includes('pdf') ? URL.createObjectURL(file) : undefined,
     }));
     setEntries((current) => [...current, ...nextEntries]);
+  };
+
+  const openFileDialog = () => {
+    fileInputRef.current?.click();
+  };
+
+  const openFolderDialog = () => {
+    folderInputRef.current?.click();
   };
 
   const removeEntry = (index: number) => {
@@ -212,6 +289,8 @@ export default function UploadPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_340px]">
         <PaperPanel className="paper-texture px-6 py-6 lg:px-8 lg:py-8">
           <div
+            role="button"
+            tabIndex={0}
             onDragOver={(event) => {
               event.preventDefault();
               setIsDragging(true);
@@ -221,6 +300,13 @@ export default function UploadPage() {
               event.preventDefault();
               setIsDragging(false);
               appendFiles(event.dataTransfer.files);
+            }}
+            onClick={openFileDialog}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openFileDialog();
+              }
             }}
             className={`rounded-[28px] border border-dashed px-6 py-10 text-center transition lg:px-10 lg:py-14 ${isDragging
               ? 'border-[color:var(--accent)] bg-[rgba(154,76,57,0.06)]'
@@ -232,26 +318,51 @@ export default function UploadPage() {
             </div>
             <h2 className="mt-6 font-display text-4xl text-[color:var(--ink-strong)]">置卷于案</h2>
             <p className="mx-auto mt-4 max-w-xl text-sm leading-8 text-[color:var(--ink-muted)]">
-              拖拽古籍图片或 PDF 至此，或轻点下方按钮选取文件。上传接口已绑定当前登录用户。
+              拖拽或点击此区域即可选取 PDF/TXT/PNG；请不要上传长截图，会导致OCR识别失败。
+            </p>
+            <p className="mx-auto mt-4 max-w-xl text-xs leading-3 text-[color:var(--ink-muted)] opacity-80">
+              建议使用TXT/纯文本PDF
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-              <label className="inline-flex cursor-pointer items-center justify-center rounded-full bg-[color:var(--accent)] px-6 py-3 text-sm tracking-[0.16em] text-white transition hover:bg-[rgba(154,76,57,0.92)]">
-                选取卷页
-                <input
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(event) => {
-                    if (event.target.files) {
-                      appendFiles(event.target.files);
-                    }
-                  }}
-                />
-              </label>
+              <ActionButton
+                variant="secondary"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openFileDialog();
+                }}
+              >
+                选取文件
+              </ActionButton>
               <ActionButton variant="ghost" onClick={handleUpload} disabled={uploading}>
                 {uploading ? '上传中' : '提交入库'}
               </ActionButton>
             </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.txt,application/pdf,text/plain"
+              className="hidden"
+              onChange={(event) => {
+                if (event.target.files) {
+                  appendFiles(event.target.files);
+                }
+                event.currentTarget.value = '';
+              }}
+            />
+            <input
+              ref={folderInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              {...({ webkitdirectory: '', directory: '' } as any)}
+              onChange={(event) => {
+                if (event.target.files) {
+                  appendFiles(event.target.files);
+                }
+                event.currentTarget.value = '';
+              }}
+            />
             {message ? <p className="mt-4 text-sm text-[color:var(--accent)]">{message}</p> : null}
           </div>
 
@@ -283,13 +394,22 @@ export default function UploadPage() {
                       </ActionButton>
                     </div>
                   </div>
+                ) : previewTextContent ? (
+                  <div className="h-full w-full px-4 py-4">
+                    <p className="mb-2 text-xs tracking-[0.2em] text-[color:var(--ink-faint)]">TXT 预览</p>
+                    <pre className="soft-scrollbar h-[calc(100%-1.5rem)] overflow-y-auto whitespace-pre-wrap break-words text-left font-ui text-sm leading-7 text-[color:var(--ink-strong)]">
+                      {previewTextContent}
+                    </pre>
+                  </div>
                 ) : (
                   <div className="space-y-3 px-6 text-center text-[color:var(--ink-faint)]">
                     <ImageIcon className="mx-auto h-10 w-10" />
                     <p className="text-sm leading-7">
                       {selectedUploadedItem?.preview_mode === 'pdf'
                         ? '当前选中卷页为 PDF，可在识文页继续进行处理。'
-                        : '上传后将在此处呈现卷页预览。'}
+                        : selectedUploadedItem?.preview_mode === 'text'
+                          ? '当前选中卷页为 TXT，可在此处预览原文内容。'
+                          : '上传后将在此处呈现卷页预览。'}
                     </p>
                   </div>
                 )}

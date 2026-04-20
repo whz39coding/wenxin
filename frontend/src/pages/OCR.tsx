@@ -41,6 +41,20 @@ export default function OCRPage() {
     description?: string;
   } | null>(null);
 
+  function isSizeGuardError(detail: string) {
+    const text = (detail || '').trim();
+    if (!text) {
+      return false;
+    }
+    return (
+      text.includes('尺寸过大') ||
+      text.includes('像素总数') ||
+      text.includes('页数过多') ||
+      text.includes('请先压缩') ||
+      text.includes('请拆分后再识别')
+    );
+  }
+
   const selectedUpload = useMemo(
     () => uploads.find((item) => item.id === selectedUploadId) || null,
     [selectedUploadId, uploads],
@@ -166,7 +180,16 @@ export default function OCRPage() {
       });
       await loadUploads();
     } catch (error: any) {
-      setMessage(error?.response?.data?.detail || '识文请求失败，请稍后再试。');
+      const detail = error?.response?.data?.detail || '识文请求失败，请稍后再试。';
+      if (isSizeGuardError(detail)) {
+        setSuccessTip({
+          title: '识文已中止',
+          description: detail,
+        });
+        setMessage('');
+      } else {
+        setMessage(detail);
+      }
     } finally {
       setIsProcessing(false);
     }
