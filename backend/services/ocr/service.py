@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import importlib
 from pathlib import Path
 from typing import Any
+import gc
 import os
 from config import config
 from core.logger import get_logger
@@ -53,80 +54,73 @@ class OCRService:
 
     # 将传入的未被OCR的文件进行OCR提取文本.
     def recognize_upload(self, user_id: int, upload_id: int) -> OCRResult:
-        unocr_ids = {
-            item.id for item in self.upload_service.list_unocr_by_user(user_id)
-        }  # 获取“尚未 OCR”的记录
+        try:
+            unocr_ids = {
+                item.id for item in self.upload_service.list_unocr_by_user(user_id)
+            }  # 获取“尚未 OCR”的记录
 
-        record = self.upload_service.get_by_id(
-            upload_id, user_id)  # 从数据库中查到这个未被OCR的文件记录
-        if record is None:
-            logger.error("OCR调用get_by_id失败")
-            raise ValueError("文件不存在或无权访问")
+            record = self.upload_service.get_by_id(
+                upload_id, user_id)  # 从数据库中查到这个未被OCR的文件记录
+            if record is None:
+                logger.error("OCR调用get_by_id失败")
+                raise ValueError("文件不存在或无权访问")
 
-        # 如果这个记录已经被OCR了，则直接返回结果
-        if record.id not in unocr_ids and (record.extracted_text or "").strip():
-            logger.warning("文件已进行OCR,请检查前端的渲染(搜索结果)")
-            text = (record.extracted_text or "").strip()
-            # chunks = self._split_text(text)
+            # 如果这个记录已经被OCR了，则直接返回结果
+            if record.id not in unocr_ids and (record.extracted_text or "").strip():
+                logger.warning("文件已进行OCR,请检查前端的渲染(搜索结果)")
+                text = (record.extracted_text or "").strip()
+                chunks = self.tok.split_text(
+                    text=text, source=upload_id, book_title=record.filename)
+                chunks = [chunk.page_content for chunk in chunks]
+                return OCRResult(
+                    upload_id=record.id,
+                    text=text,
+                    model="cached-extracted-text",
+                    chunk_count=len(chunks),
+                )
+
+            file_path = self.upload_service.get_file_path(upload_id, user_id)
+            if file_path is None:
+                logger.error("OCR无法获取文件路径")
+                raise FileNotFoundError("文件已损坏或被移除")
+
+            text, ocr_model = self._extract_text(
+                file_path, record.content_type)
+            if not text.strip():
+                logger.error("OCR提取文本失败")
+                raise ValueError("未识别到有效文本，请更换更清晰的文件")
+
+            # 将OCR文本写入数据库
+            updated = self.upload_service.set_extracted_text(
+                record.id, user_id, text)
+            if updated is None:
+                logger.error("OCR写入数据库失败")
+                raise RuntimeError("写回 OCR 结果失败")
+
+            # 将OCR文本索引加到向量库,为后续问答使用
             chunks = self.tok.split_text(
                 text=text, source=upload_id, book_title=record.filename)
-            chunks = [chunk.page_content for chunk in chunks]
-            # self._index_to_chroma(
-            #     user_id=user_id,
-            #     upload_id=record.id,
-            #     filename=record.filename,
-            #     chunks=chunks,
-            # )
+            self._index_to_chroma(
+                user_id=user_id,
+                upload_id=record.id,
+                filename=record.filename,
+                chunks=chunks,
+            )
+
             return OCRResult(
                 upload_id=record.id,
                 text=text,
-                model="cached-extracted-text",
+                model=ocr_model,
                 chunk_count=len(chunks),
             )
-
-        file_path = self.upload_service.get_file_path(upload_id, user_id)
-        if file_path is None:
-            logger.error("OCR无法获取文件路径")
-            raise FileNotFoundError("文件已损坏或被移除")
-
-        text, ocr_model = self._extract_text(file_path, record.content_type)
-        if not text.strip():
-            logger.error("OCR提取文本失败")
-            raise ValueError("未识别到有效文本，请更换更清晰的文件")
-
-        # 将OCR文本写入数据库
-        updated = self.upload_service.set_extracted_text(
-            record.id, user_id, text)
-        if updated is None:
-            logger.error("OCR写入数据库失败")
-            raise RuntimeError("写回 OCR 结果失败")
-
-        # 将OCR文本索引加到向量库,为后续问答使用
-        chunks = self.tok.split_text(
-            text=text, source=upload_id, book_title=record.filename)
-        # chunks = [chunk.page_content for chunk in chunks]
-        self._index_to_chroma(
-            user_id=user_id,
-            upload_id=record.id,
-            filename=record.filename,
-            chunks=chunks,
-        )
-
-        return OCRResult(
-            upload_id=record.id,
-            text=text,
-            model=ocr_model,
-            chunk_count=len(chunks),
-        )
+        finally:
+            self._cleanup_after_task()
     # 根据文件存储路径，对文件进行OCR识别
 
     def _extract_text(self, file_path: Path, content_type: str) -> tuple[str, str]:
         if content_type == "application/pdf":
             text = self._extract_pdf_text(file_path)
             if text.strip():  # pdf提取成功
-                print("=====pdf text=======")
-                print(text)
-                print("=====pdf text end=======")
                 return text, "pypdf-text-layer"
             # PDF 没有文本层时，回退到按页渲染图片后 OCR。
             logger.warning("PDF文件无文本层，回退到图片页OCR")
@@ -216,46 +210,68 @@ class OCRService:
             ) from exc
 
         document = pdfium_module.PdfDocument(str(file_path))
-        page_count = len(document)
-        if page_count == 0:
-            return ""
+        try:
+            page_count = len(document)
+            if page_count == 0:
+                return ""
 
-        if page_count > self._pdf_max_pages:
-            raise ValueError(
-                f"PDF页数过多（{page_count}页），请拆分后再识别（最多 {self._pdf_max_pages} 页）"
-            )
+            if page_count > self._pdf_max_pages:
+                raise ValueError(
+                    f"PDF页数过多（{page_count}页），请拆分后再识别（最多 {self._pdf_max_pages} 页）"
+                )
 
-        texts: list[str] = []
-        for index in range(page_count):
-            page = document[index]
-            page_no = index + 1
+            texts: list[str] = []
+            for index in range(page_count):
+                page = document[index]
+                bitmap = None
+                page_image = None
+                try:
+                    page_no = index + 1
 
-            width_px, height_px = self._estimate_pdf_page_pixels(
-                page=page,
-                scale=self._pdf_render_scale,
-            )
-            print(f"PDF第{page_no}页分辨率: {width_px}x{height_px}")
-            self._ensure_image_safe(
-                width=width_px,
-                height=height_px,
-                source=f"PDF第{page_no}页",
-            )
+                    width_px, height_px = self._estimate_pdf_page_pixels(
+                        page=page,
+                        scale=self._pdf_render_scale,
+                    )
+                    logger.info("PDF第%d页分辨率: %dx%d",
+                                page_no, width_px, height_px)
+                    self._ensure_image_safe(
+                        width=width_px,
+                        height=height_px,
+                        source=f"PDF第{page_no}页",
+                    )
 
-            try:
-                bitmap = page.render(scale=self._pdf_render_scale)
-                page_image = bitmap.to_numpy()
-            except Exception as exc:
-                raise RuntimeError(f"PDF第{page_no}页渲染失败: {exc}") from exc
+                    try:
+                        bitmap = page.render(scale=self._pdf_render_scale)
+                        page_image = bitmap.to_numpy()
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"PDF第{page_no}页渲染失败: {exc}") from exc
 
-            page_text = self._extract_image_array_text(
-                image_array=page_image,
-                source=f"PDF第{page_no}页",
-            )
-            if page_text.strip():
-                texts.append(page_text)
+                    page_text = self._extract_image_array_text(
+                        image_array=page_image,
+                        source=f"PDF第{page_no}页",
+                    )
+                    if page_text.strip():
+                        texts.append(page_text)
+                finally:
+                    if page_image is not None:
+                        del page_image
+                    if bitmap is not None:
+                        close_bitmap = getattr(bitmap, "close", None)
+                        if callable(close_bitmap):
+                            close_bitmap()
+                    close_page = getattr(page, "close", None)
+                    if callable(close_page):
+                        close_page()
+                    # 分页处理后主动触发回收，避免长 PDF 在循环中内存攀升。
+                    gc.collect()
 
-        logger.info("图片型PDF OCR完成，共识别 %d/%d 页", len(texts), page_count)
-        return self._normalize_layout_text("\n".join(texts))
+            logger.info("图片型PDF OCR完成，共识别 %d/%d 页", len(texts), page_count)
+            return self._normalize_layout_text("\n".join(texts))
+        finally:
+            close_document = getattr(document, "close", None)
+            if callable(close_document):
+                close_document()
 
     def _estimate_pdf_page_pixels(self, page: Any, scale: float) -> tuple[int, int]:
         try:
@@ -375,7 +391,7 @@ class OCRService:
     # 对图片格式的文件进行OCR识别
     def _extract_image_like_text(self, file_path: str | Path) -> str:
         """
-        对图片（jpg/png/tiff 等）进行 OCR，返回提取的纯文本。
+        对图片（png/tiff 等）进行 OCR，返回提取的纯文本。
         """
         file_path = Path(file_path)
         if not file_path.exists():
@@ -500,6 +516,36 @@ class OCRService:
             local_files_only=True,
         )
         return self._encoder
+
+    def _cleanup_after_task(self) -> None:
+        """每次OCR任务后尽可能释放内存，降低连续任务导致OOM的风险。"""
+        if config.ocr_release_after_task:
+            self._dispose_model(self._rapid_ocr)
+            self._rapid_ocr = None
+
+        if config.ocr_release_embedding_after_task:
+            self._dispose_model(self._encoder)
+            self._encoder = None
+
+        self._clear_runtime_memory()
+
+    @staticmethod
+    def _dispose_model(model: Any) -> None:
+        """尽可能调用底层资源释放方法，再交由 GC 回收。"""
+        if model is None:
+            return
+        for method_name in ("close", "release", "dispose", "shutdown"):
+            method = getattr(model, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:
+                    # 释放阶段不抛出，避免影响主流程。
+                    pass
+
+    @staticmethod
+    def _clear_runtime_memory() -> None:
+        gc.collect()
     # 把文本切块编码成向量，然后存入向量数据库，用于后续语义检索。
 
     # 将文本切块索引到向量数据库中
@@ -538,15 +584,6 @@ class OCRService:
              "user_id": user_id, "upload_id": upload_id, "chunk_index": idx}
             for idx, chunk in enumerate(chunks)
         ]
-        metadatas = [
-            {
-                "user_id": user_id,
-                "upload_id": upload_id,
-                "filename": filename[:5],
-                "chunk_index": idx,
-            }
-            for idx in range(len(chunks))
-        ]
 
         collection.upsert(
             ids=ids,
@@ -554,10 +591,13 @@ class OCRService:
             embeddings=embeddings,
             metadatas=new_metadatas,
         )
-        print("=====chunk_str:=======")
-        for i in chunks_str:
-            print(i)
-        print("=====over chunk_str======")
+
+        # upsert 后尽快释放大对象，减少对后续请求的内存挤压。
+        del embeddings
+        del chunks_str
+        del new_metadatas
+        del ids
+        gc.collect()
         '''
         插入的记录示例:
             Record 1

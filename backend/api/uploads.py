@@ -76,7 +76,7 @@ async def upload_file(
     file: UploadFile = File(...),
     current_user: UserRecord = Depends(get_current_user),
 ) -> UploadResponse:
-    """上传单个卷页文件（JPG / PNG / PDF / TXT），大小上限 50 MB。"""
+    """上传单个卷页文件（ PNG / PDF / TXT），大小上限 50 MB。"""
     data = await file.read()
     content_type = file.content_type or ""
 

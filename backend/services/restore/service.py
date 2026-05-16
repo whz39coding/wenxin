@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import importlib
 import json
+import gc
 import os
 from pathlib import Path
 import re
@@ -64,52 +65,57 @@ class RestoreService:
         self._prompt_template: str | None = None
 
     def restore(self, user_id: int, text_value: str) -> RestoreResult:
-        raw_text = (text_value or "").strip()
-        masked_text = self._normalize_mask_text(raw_text)
+        try:
+            raw_text = (text_value or "").strip()
+            masked_text = self._normalize_mask_text(raw_text)
 
-        if not masked_text:
-            raise ValueError("待补全文本不能为空")
-        if "_" not in masked_text:
-            raise ValueError("请使用 '_' 标记残缺位置")
+            if not masked_text:
+                raise ValueError("待补全文本不能为空")
+            if "_" not in masked_text:
+                raise ValueError("请使用 '_' 标记残缺位置")
 
-        hits = self._retrieve_hits(user_id=user_id, masked_text=masked_text)
+            hits = self._retrieve_hits(
+                user_id=user_id, masked_text=masked_text)
 
-        kb_restored = self._restore_with_knowledge(
-            masked_text=masked_text, hits=hits)
-        if kb_restored is not None:
+            kb_restored = self._restore_with_knowledge(
+                masked_text=masked_text, hits=hits)
+            if kb_restored is not None:
+                evidence = self._build_evidence(hits)
+                return RestoreResult(
+                    input_text=raw_text,
+                    restored_text=kb_restored,
+                    restored_segments=self._build_segments(
+                        masked_text, kb_restored),
+                    evidence=evidence,
+                    explanation=self._build_rag_explanation(evidence),
+                    model="rag-direct",
+                )
+
+            runtime = self._load_user_search_preferences(user_id)
+            llm_restored, llm_explanation, model_name = self._restore_with_llm(
+                masked_text, hits, runtime)
+
+            if not llm_restored:
+                llm_restored = masked_text
+                llm_explanation = "未能完成有效补阙，当前返回原始残句，请调整输入或检查模型配置后重试。"
+                model_name = "restore-failed"
+
             evidence = self._build_evidence(hits)
+            if not evidence:
+                evidence = ["知识库未命中有效章句，本次由大模型直接补全。"]
+
             return RestoreResult(
                 input_text=raw_text,
-                restored_text=kb_restored,
+                restored_text=llm_restored,
                 restored_segments=self._build_segments(
-                    masked_text, kb_restored),
+                    masked_text, llm_restored),
                 evidence=evidence,
-                explanation=self._build_rag_explanation(evidence),
-                model="rag-direct",
+                explanation=llm_explanation or self._build_rag_explanation(
+                    evidence),
+                model=model_name,
             )
-
-        runtime = self._load_user_search_preferences(user_id)
-        llm_restored, llm_explanation, model_name = self._restore_with_llm(
-            masked_text, hits, runtime)
-
-        if not llm_restored:
-            llm_restored = masked_text
-            llm_explanation = "未能完成有效补阙，当前返回原始残句，请调整输入或检查模型配置后重试。"
-            model_name = "restore-failed"
-
-        evidence = self._build_evidence(hits)
-        if not evidence:
-            evidence = ["知识库未命中有效章句，本次由大模型直接补全。"]
-
-        return RestoreResult(
-            input_text=raw_text,
-            restored_text=llm_restored,
-            restored_segments=self._build_segments(masked_text, llm_restored),
-            evidence=evidence,
-            explanation=llm_explanation or self._build_rag_explanation(
-                evidence),
-            model=model_name,
-        )
+        finally:
+            self._cleanup_after_task()
 
     def _retrieve_hits(self, user_id: int, masked_text: str) -> list[RestoreHit]:
         collection_name = f"{self.collection_prefix}_{user_id}"
@@ -168,6 +174,8 @@ class RestoreService:
         prompt_template = self._load_prompt_template()
         full_prompt = prompt_template.format(
             masked_text=masked_text, context=context_text)
+        llm = None
+        response = None
         try:
             llm = ChatOpenAI(
                 api_key=api_key, base_url=base_url, model=model_name)
@@ -181,6 +189,11 @@ class RestoreService:
         except Exception as exc:
             logger.error("补缺大模型调用失败: %s", exc)
             return "", "模型调用失败，已回退到原始文本。", "invoke-failed"
+        finally:
+            self._dispose_resource(response)
+            self._dispose_resource(llm)
+            response = None
+            llm = None
 
     @staticmethod
     def _normalize_mask_text(value: str) -> str:
@@ -557,6 +570,30 @@ class RestoreService:
             local_files_only=True,
         )
         return self._encoder
+
+    def _cleanup_after_task(self) -> None:
+        """请求结束后清理 embedding 与运行时对象，优先降低常驻内存。"""
+        if config.restore_release_embedding_after_task:
+            self._dispose_resource(self._encoder)
+            self._encoder = None
+
+        self._clear_runtime_memory()
+
+    @staticmethod
+    def _dispose_resource(resource: Any) -> None:
+        if resource is None:
+            return
+        for method_name in ("close", "release", "dispose", "shutdown"):
+            method = getattr(resource, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _clear_runtime_memory() -> None:
+        gc.collect()
 
     @staticmethod
     def _is_placeholder(value: str) -> bool:

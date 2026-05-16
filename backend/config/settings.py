@@ -15,6 +15,7 @@ def _get_bool(name: str, default: bool = False) -> bool:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str
@@ -58,7 +59,11 @@ class Settings:
     ocr_max_image_width: int
     ocr_max_image_height: int
     ocr_pdf_render_scale: float
-    ocr_pdf_max_pages : int
+    ocr_pdf_max_pages: int
+    ocr_release_after_task: bool
+    ocr_release_embedding_after_task: bool
+    search_release_embedding_after_task: bool
+    restore_release_embedding_after_task: bool
 
     @property
     def mysql_url(self) -> str:
@@ -105,4 +110,11 @@ config = Settings(
     ocr_max_image_height=int(os.getenv("OCR_MAX_IMAGE_HEIGHT", "2000")),
     ocr_pdf_render_scale=float(os.getenv("OCR_PDF_RENDER_SCALE", "1.8")),
     ocr_pdf_max_pages=int(os.getenv("OCR_PDF_MAX_PAGES", "80")),
+    ocr_release_after_task=_get_bool("OCR_RELEASE_AFTER_TASK", default=True),
+    ocr_release_embedding_after_task=_get_bool(
+        "OCR_RELEASE_EMBEDDING_AFTER_TASK", default=True),
+    search_release_embedding_after_task=_get_bool(
+        "SEARCH_RELEASE_EMBEDDING_AFTER_TASK", default=True),
+    restore_release_embedding_after_task=_get_bool(
+        "RESTORE_RELEASE_EMBEDDING_AFTER_TASK", default=True),
 )

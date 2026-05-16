@@ -21,7 +21,7 @@ def validate_upload(content_type: str, file_size: int, filename: str = "") -> st
     if not is_allowed:
         return (
             f"不支持的文件类型：{content_type}，"
-            "当前仅支持 JPG / PNG / PDF / TXT"
+            "当前仅支持  PNG / PDF / TXT"
         )
     if file_size > MAX_FILE_BYTES:
         limit_mb = MAX_FILE_BYTES // 1024 // 1024

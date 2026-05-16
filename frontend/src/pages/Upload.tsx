@@ -20,12 +20,11 @@ type UploadEntry = {
 };
 
 const uploadTips = [
-  '支持 PDF、TXT 及文件夹导入（自动筛选）。',
-  '建议使用光线均匀、边缘完整的单页扫描。',
-  '竖排古籍与繁体文字场景已做专项识别优化。',
+  '支持 PDF、TXT和PNG。',
+  '建议使用光线均匀、边缘完整的单页扫描不要使用长截图。',
 ];
 
-const ACCEPTED_EXTENSIONS = ['.pdf', '.txt'];
+const ACCEPTED_EXTENSIONS = ['.pdf', '.txt', '.png'];
 
 export default function UploadPage() {
   const [isDragging, setIsDragging] = useState(false);
@@ -183,12 +182,12 @@ export default function UploadPage() {
     });
 
     if (accepted.length === 0) {
-      setMessage('仅支持 PDF、TXT 或包含这两类文件的文件夹。');
+      setMessage('仅支持 PDF、TXT、PNG 或包含这三类文件的文件夹。');
       return;
     }
 
     if (accepted.length < all.length) {
-      setMessage(`已过滤 ${all.length - accepted.length} 个非 PDF/TXT 文件。`);
+      setMessage(`已过滤 ${all.length - accepted.length} 个非 PDF/TXT/PNG 文件。`);
     } else {
       setMessage('');
     }
@@ -280,7 +279,7 @@ export default function UploadPage() {
         description="可将《论语》卷页图片或 PDF 进行上传,点击提交入库即可加入到书阁中,后续可以在 OCR 页识文加入到知识库供问答使用。"
         aside={
           <>
-            <MetaBlock label="支持类型" value="&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; JPG / PNG / PDF " />
+            <MetaBlock label="支持类型" value="&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; TXT / PNG / PDF " />
             <MetaBlock label="处理流程" value="&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 上传成功后可在识文析字页选择已入库卷页，调用 OCR 接口生成文本。" />
           </>
         }
@@ -311,7 +310,7 @@ export default function UploadPage() {
             className={`rounded-[28px] border border-dashed px-6 py-10 text-center transition lg:px-10 lg:py-14 ${isDragging
               ? 'border-[color:var(--accent)] bg-[rgba(154,76,57,0.06)]'
               : 'border-[color:var(--line-strong)] bg-[rgba(255,255,255,0.46)]'
-              }`}
+              } cursor-pointer`}
           >
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[rgba(184,153,101,0.10)] text-[color:var(--accent)]">
               <UploadCloud className="h-9 w-9" />
@@ -326,6 +325,7 @@ export default function UploadPage() {
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
               <ActionButton
                 variant="secondary"
+                className="cursor-pointer"
                 onClick={(event) => {
                   event.stopPropagation();
                   openFileDialog();
@@ -333,7 +333,14 @@ export default function UploadPage() {
               >
                 选取文件
               </ActionButton>
-              <ActionButton variant="ghost" onClick={handleUpload} disabled={uploading}>
+              <ActionButton
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleUpload();
+                }}
+                disabled={uploading}
+              >
                 {uploading ? '上传中' : '提交入库'}
               </ActionButton>
             </div>
@@ -341,7 +348,7 @@ export default function UploadPage() {
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.txt,application/pdf,text/plain"
+              accept=".pdf,.txt,.png,application/pdf,text/plain,image/png"
               className="hidden"
               onChange={(event) => {
                 if (event.target.files) {

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import importlib
 import json
+import gc
 import os
 from pathlib import Path
 import re
@@ -65,71 +66,75 @@ class SearchService:
 
     # 根据问题检索向量库,调用LLM 进行答案生成返回结果
     def search(self, user_id: int, query: str) -> SearchResult:
-        question = (query or "").strip()
-        if not question:
-            logger.warning("query 不能为空")
-            raise ValueError("query 不能为空")
-
-        collection_name = f"{self.collection_prefix}_{user_id}"
         try:
-            collection = self.chroma_client.get_collection(
-                name=collection_name)
-        except Exception as exc:
-            logger.error("未找到知识库索引，请先完成 OCR 入库")
-            raise ValueError("未找到知识库索引，请先完成 OCR 入库") from exc
+            question = (query or "").strip()
+            if not question:
+                logger.warning("query 不能为空")
+                raise ValueError("query 不能为空")
 
-        # 对问题进行编码
-        query_vector = self._get_encoder().encode(
-            [question], normalize_embeddings=True
-        )[0].tolist()
+            collection_name = f"{self.collection_prefix}_{user_id}"
+            try:
+                collection = self.chroma_client.get_collection(
+                    name=collection_name)
+            except Exception as exc:
+                logger.error("未找到知识库索引，请先完成 OCR 入库")
+                raise ValueError("未找到知识库索引，请先完成 OCR 入库") from exc
 
-        # 从向量库中进行检索与问题相关的章句
-        retrieved = collection.query(
-            query_embeddings=[query_vector],
-            n_results=self.top_k,
-            include=["documents", "metadatas", "distances"],
-        )
+            # 对问题进行编码
+            query_vector = self._get_encoder().encode(
+                [question], normalize_embeddings=True
+            )[0].tolist()
 
-        # 只是取第一个 query 的结果, 但里面仍然有 top_k 条文档: [doc1,doc2,doc3],[meta1,meta2,meta3]
-        docs = (retrieved.get("documents") or [[]])[0]
-        metas = (retrieved.get("metadatas") or [[]])[0]
-        distances = (retrieved.get("distances") or [[]])[0]
+            # 从向量库中进行检索与问题相关的章句
+            retrieved = collection.query(
+                query_embeddings=[query_vector],
+                n_results=self.top_k,
+                include=["documents", "metadatas", "distances"],
+            )
 
-        hits: list[SearchHit] = []
-        for index, document in enumerate(docs):
-            metadata = metas[index] if index < len(metas) else {}
-            distance = distances[index] if index < len(distances) else 1.0
-            hits.append(self._to_searchhit(document, metadata or {}, distance))
+            # 只是取第一个 query 的结果, 但里面仍然有 top_k 条文档: [doc1,doc2,doc3],[meta1,meta2,meta3]
+            docs = (retrieved.get("documents") or [[]])[0]
+            metas = (retrieved.get("metadatas") or [[]])[0]
+            distances = (retrieved.get("distances") or [[]])[0]
 
-        if not hits:
-            logger.warning("未检索到相关章句")
-        else:
-            logger.info("检索到 %d 条结果", len(hits))
+            hits: list[SearchHit] = []
+            for index, document in enumerate(docs):
+                metadata = metas[index] if index < len(metas) else {}
+                distance = distances[index] if index < len(distances) else 1.0
+                hits.append(self._to_searchhit(
+                    document, metadata or {}, distance))
 
-        runtime = self._load_user_search_preferences(user_id)
+            if not hits:
+                logger.warning("未检索到相关章句")
+            else:
+                logger.info("检索到 %d 条结果", len(hits))
 
-        # 先用问答模型生成答案
-        answer, answer_model = self._answer_with_llm(
-            question, hits, runtime)
+            runtime = self._load_user_search_preferences(user_id)
 
-        # 再用翻译模型补全缺失译文
-        translation_mapping, translate_model = self._translate_with_llm(
-            hits, runtime)
+            # 先用问答模型生成答案
+            answer, answer_model = self._answer_with_llm(
+                question, hits, runtime)
 
-        # 根据 LLM 返回的翻译映射更新 hits
-        for idx, translation in translation_mapping.items():
-            if 0 <= idx < len(hits):
-                hits[idx].translation = translation
+            # 再用翻译模型补全缺失译文
+            translation_mapping, translate_model = self._translate_with_llm(
+                hits, runtime)
 
-        references = self._build_references(hits)
+            # 根据 LLM 返回的翻译映射更新 hits
+            for idx, translation in translation_mapping.items():
+                if 0 <= idx < len(hits):
+                    hits[idx].translation = translation
 
-        return SearchResult(
-            query=question,
-            answer=answer,
-            references=references,
-            model=f"answer:{answer_model}; translate:{translate_model}",
-            results=hits,
-        )
+            references = self._build_references(hits)
+
+            return SearchResult(
+                query=question,
+                answer=answer,
+                references=references,
+                model=f"answer:{answer_model}; translate:{translate_model}",
+                results=hits,
+            )
+        finally:
+            self._cleanup_after_task()
 
     def search_with_progress(
         self,
@@ -240,6 +245,8 @@ class SearchService:
             logger.error(f"搜索失败: {exc}")
             on_progress("error", {"error": str(exc)})
             raise
+        finally:
+            self._cleanup_after_task()
 
     def _answer_with_llm(self, question: str, hits: list[SearchHit], runtime: dict[str, str]) -> tuple[str, str]:
         """使用问答模型生成答案正文。"""
@@ -258,6 +265,8 @@ class SearchService:
         full_prompt = prompt_template.format(
             query=question, context=context_text)
 
+        llm = None
+        response = None
         try:
             llm = ChatOpenAI(
                 api_key=api_key,
@@ -275,6 +284,11 @@ class SearchService:
         except Exception as exc:
             logger.error("问答模型调用失败，回退检索模式: %s", exc)
             return self._fallback_answer(question, hits, reason="invoke-failed"), "retrieval-only"
+        finally:
+            self._dispose_resource(response)
+            self._dispose_resource(llm)
+            response = None
+            llm = None
 
     def _translate_with_llm(self, hits: list[SearchHit], runtime: dict[str, str]) -> tuple[dict[int, str], str]:
         """使用翻译模型仅补全缺失译文，返回 {0-based 索引: 译文}。"""
@@ -303,6 +317,8 @@ class SearchService:
             )
         full_prompt = translate_prompt.format(context="\n".join(lines))
 
+        llm = None
+        response = None
         try:
             llm = ChatOpenAI(
                 api_key=api_key,
@@ -317,6 +333,11 @@ class SearchService:
         except Exception as exc:
             logger.error("翻译模型调用失败: %s", exc)
             return {}, "translate-failed"
+        finally:
+            self._dispose_resource(response)
+            self._dispose_resource(llm)
+            response = None
+            llm = None
 
     def _load_user_search_preferences(self, user_id: int) -> dict[str, str]:
         if self.mysql_engine is None:
@@ -610,6 +631,30 @@ class SearchService:
             local_files_only=True,
         )
         return self._encoder
+
+    def _cleanup_after_task(self) -> None:
+        """请求结束后按配置清理大对象，优先节省常驻内存。"""
+        if config.search_release_embedding_after_task:
+            self._dispose_resource(self._encoder)
+            self._encoder = None
+
+        self._clear_runtime_memory()
+
+    @staticmethod
+    def _dispose_resource(resource: Any) -> None:
+        if resource is None:
+            return
+        for method_name in ("close", "release", "dispose", "shutdown"):
+            method = getattr(resource, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _clear_runtime_memory() -> None:
+        gc.collect()
 
     # 检查是不是填充了
     @staticmethod
